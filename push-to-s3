@@ -1,0 +1,52 @@
+#!/usr/bin/env ruby
+
+require 'fog'
+require 'colorize'
+
+if ARGV.length < 4
+  STDERR.puts "CMD: push-to-s3 S3_BUCKET DIRECTORY VERSION FILE"
+  STDERR.puts "Args given: #{ARGV}\n\n"
+  exit 1
+end
+
+def check_environment_var(var)
+  if ENV[var].nil?
+    STDERR.puts "Environment variable #{var} not set.\n\n"
+    exit 1
+  end
+end
+
+check_environment_var "AWS_ACCESS_KEY"
+check_environment_var "AWS_SECRET_KEY"
+
+BUCKET, DIRECTORY, version, file_path = ARGV
+FILE_NAME = File.basename(file_path)
+
+def connection
+  con = Fog::Storage.new({
+    :provider                 => 'AWS',
+    :region                   => 'us-west-1',
+    :aws_access_key_id        => ENV["AWS_ACCESS_KEY"],
+    :aws_secret_access_key    => ENV["AWS_SECRET_KEY"]
+  })
+  con.directories.get(BUCKET)
+end
+
+def s3_location(ver)
+  File.join(DIRECTORY, ver, FILE_NAME)
+end
+
+
+minor = (version.split('.')[0..1] << 'x').join('.')
+major = (version.split('.')[0..0] << 'x' << 'y').join('.')
+
+exists = connection.files.head(s3_location(version))
+
+if exists
+  STDERR.puts "Skipping deployment this version already exists: #{version}".colorize(:red)
+else
+  [version, minor, major].each do |v|
+    connection.files.create(key: s3_location(v), body: File.open(file_path), public: true)
+    STDOUT.puts "Successfully released #{v}".colorize(:green)
+  end
+end
